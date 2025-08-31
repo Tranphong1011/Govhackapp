@@ -11,10 +11,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 import os
 import random
-from database import UserDB
+
+# YData Profiling imports
 from ydata_profiling import ProfileReport
 from streamlit_ydata_profiling import st_profile_report
 
+# Page configuration
 st.set_page_config(
     page_title="Government Data Conversational AI",
     page_icon="🏛️",
@@ -22,6 +24,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Load API key from secrets
 try:
     OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 except KeyError:
@@ -43,10 +46,6 @@ if 'uploaded_files_hash' not in st.session_state:
     st.session_state.uploaded_files_hash = ""
 if 'profile_reports' not in st.session_state:
     st.session_state.profile_reports = {}
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-if 'username' not in st.session_state:
-    st.session_state.username = ""
 
 class DataProcessor:
     def __init__(self):
@@ -64,13 +63,14 @@ class DataProcessor:
             else:
                 return None, f"Unsupported file format: {file_extension}"
             
+            # Add metadata
             metadata = {
                 'filename': uploaded_file.name,
                 'size': uploaded_file.size,
                 'columns': list(df.columns),
                 'rows': len(df),
                 'upload_time': datetime.now().isoformat(),
-                'dataframe': df
+                'dataframe': df  # Store the actual dataframe
             }
             
             return df, metadata
@@ -107,12 +107,14 @@ class ProfileReportGenerator:
     def generate_profile_report(self, df: pd.DataFrame, dataset_name: str, minimal: bool = True):
         """Generate ProfileReport for a dataset"""
         try:
+            # Performance optimization
             if len(df) > 1000:
                 df_sample = df.sample(n=1000, random_state=42)
                 st.warning(f"⚡ Using sample of 1000 rows from {len(df)} total rows for faster processing.")
             else:
                 df_sample = df
                 
+            # Simple and compatible ProfileReport
             profile = ProfileReport(
                 df_sample,
                 title=f"{dataset_name} Profile Report",
@@ -134,11 +136,13 @@ class ProfileReportGenerator:
             return
             
         try:
+            # Try using streamlit-ydata-profiling first
             st_profile_report(profile, navbar=True, key=key)
             
         except ImportError:
             st.warning("📦 Installing streamlit-ydata-profiling recommended for better display")
             try:
+                # Fallback to HTML
                 profile_html = profile.to_html()
                 st.components.v1.html(profile_html, height=800, scrolling=True)
             except Exception as e:
@@ -146,6 +150,9 @@ class ProfileReportGenerator:
         
         except Exception as e:
             st.error(f"❌ Display error: {str(e)}")
+
+# [Previous classes remain the same - DatasetConnectionAnalyzer, QuestionGenerator, TrustScoreCalculator, AuditTrail, ConversationalAI]
+# ... [keeping all existing classes unchanged] ...
 
 class DatasetConnectionAnalyzer:
     def __init__(self):
@@ -162,19 +169,22 @@ class DatasetConnectionAnalyzer:
         
         dataset_names = list(datasets.keys())
         
+        # Find common columns
         for i, name1 in enumerate(dataset_names):
             for name2 in dataset_names[i+1:]:
                 df1, df2 = datasets[name1], datasets[name2]
                 common_cols = set(df1.columns).intersection(set(df2.columns))
-                common_cols.discard('source_dataset')
+                common_cols.discard('source_dataset')  # Ignore our added column
                 
                 if common_cols:
                     connections['common_columns'][f"{name1}_{name2}"] = list(common_cols)
         
+        # Find potential join keys (ID-like columns)
         for i, name1 in enumerate(dataset_names):
             for name2 in dataset_names[i+1:]:
                 df1, df2 = datasets[name1], datasets[name2]
                 
+                # Look for ID-like columns
                 id_cols_1 = [col for col in df1.columns if 'id' in col.lower() or 'code' in col.lower()]
                 id_cols_2 = [col for col in df2.columns if 'id' in col.lower() or 'code' in col.lower()]
                 
@@ -184,6 +194,7 @@ class DatasetConnectionAnalyzer:
                         'dataset2_keys': id_cols_2
                     }
         
+        # Analyze domain relationships
         connections['domain_relationships'] = self._analyze_domain_relationships(datasets)
         
         return connections
@@ -195,6 +206,7 @@ class DatasetConnectionAnalyzer:
         for name, df in datasets.items():
             columns_lower = [col.lower() for col in df.columns]
             
+            # Categorize dataset
             if any(keyword in ' '.join(columns_lower) for keyword in ['budget', 'cost', 'expense', 'revenue']):
                 domain = 'Finance'
             elif any(keyword in ' '.join(columns_lower) for keyword in ['employee', 'staff', 'leave', 'performance']):
@@ -217,6 +229,7 @@ class QuestionGenerator:
         """Generate questions for individual datasets and combined analysis"""
         all_questions = {}
         
+        # Generate questions for each individual dataset
         for name, df in datasets.items():
             try:
                 questions = self._generate_single_dataset_questions(df, name)
@@ -225,6 +238,7 @@ class QuestionGenerator:
                 st.warning(f"Could not generate questions for {name}: {str(e)}")
                 all_questions[name] = self._get_fallback_questions()
         
+        # Generate cross-dataset questions if multiple datasets
         if len(datasets) > 1:
             try:
                 cross_questions = self._generate_cross_dataset_questions(datasets)
@@ -237,6 +251,7 @@ class QuestionGenerator:
     
     def select_top_questions(self, all_questions: Dict[str, List[str]], num_questions: int = 5) -> List[str]:
         """Select top questions from all available questions"""
+        # Collect all questions
         question_pool = []
         
         for dataset_name, questions in all_questions.items():
@@ -247,11 +262,14 @@ class QuestionGenerator:
                     'priority': self._calculate_question_priority(question, dataset_name)
                 })
         
+        # Sort by priority and mix
         question_pool = sorted(question_pool, key=lambda x: x['priority'], reverse=True)
         
+        # Select diverse questions (not all from same source)
         selected = []
         used_sources = set()
         
+        # First pass: select high priority questions from different sources
         for item in question_pool:
             if len(selected) >= num_questions:
                 break
@@ -259,6 +277,7 @@ class QuestionGenerator:
                 selected.append(item['question'])
                 used_sources.add(item['source'])
         
+        # Second pass: fill remaining slots randomly
         remaining_questions = [item['question'] for item in question_pool if item['question'] not in selected]
         while len(selected) < num_questions and remaining_questions:
             selected.append(remaining_questions.pop(random.randint(0, len(remaining_questions)-1)))
@@ -282,9 +301,8 @@ class QuestionGenerator:
 
         Sample Data: {data_summary['sample_data'][0] if data_summary['sample_data'] else 'No data'}
 
-        Generate SHORT, concise questions (maximum 8-10 words each) focusing on key insights, trends, and outliers.
-        Format: Return exactly 3 short questions, each on a new line, numbered 1-3.
-        Examples: "Budget variance by department?", "Top spending categories?", "Performance trends?"
+        Generate questions focusing on key insights, trends, and outliers specific to this dataset.
+        Format: Return exactly 3 questions, each on a new line, numbered 1-3.
         """
         
         response = self.client.chat.completions.create(
@@ -303,6 +321,7 @@ class QuestionGenerator:
         """Generate questions that connect multiple datasets"""
         connections = self.connection_analyzer.find_connections(datasets)
         
+        # Create summary of datasets
         dataset_summary = {}
         for name, df in datasets.items():
             data_summary = self._analyze_data_structure(df)
@@ -329,9 +348,7 @@ class QuestionGenerator:
         - Find insights that emerge only when datasets are combined
         - Highlight discrepancies or patterns across departments
 
-        Generate SHORT, concise questions (maximum 8-10 words each) that analyze relationships between datasets.
-        Format: Return exactly 4 short questions, each on a new line, numbered 1-4.
-        Examples: "Budget vs performance correlation?", "Cross-department efficiency comparison?", "Resource allocation patterns?"
+        Format: Return exactly 4 questions, each on a new line, numbered 1-4.
         """
         
         response = self.client.chat.completions.create(
@@ -350,15 +367,18 @@ class QuestionGenerator:
         """Calculate priority score for question selection"""
         priority = 1.0
         
+        # Cross-dataset questions get higher priority
         if source == 'cross_dataset':
             priority += 0.5
         
+        # Questions with certain keywords get higher priority
         high_priority_keywords = ['trend', 'outlier', 'compare', 'correlation', 'pattern', 'efficiency', 'budget']
         for keyword in high_priority_keywords:
             if keyword.lower() in question.lower():
                 priority += 0.2
                 break
         
+        # Questions with numbers/metrics get slight boost
         if any(char.isdigit() for char in question):
             priority += 0.1
         
@@ -377,6 +397,7 @@ class QuestionGenerator:
             'unique_values': {col: df[col].nunique() for col in df.columns if df[col].dtype == 'object'}
         }
         
+        # Identify potential key fields
         analysis['potential_id_fields'] = [col for col in df.columns if 'id' in col.lower() or 'code' in col.lower()]
         analysis['potential_amount_fields'] = [col for col in df.columns if any(keyword in col.lower() for keyword in ['amount', 'cost', 'budget', 'salary', 'revenue', 'expense', 'price', 'value'])]
         analysis['potential_date_fields'] = [col for col in df.columns if any(keyword in col.lower() for keyword in ['date', 'time', 'year', 'month', 'day'])]
@@ -387,6 +408,7 @@ class QuestionGenerator:
         """Auto-detect the domain/type of data"""
         columns_lower = [col.lower() for col in data_summary['columns']]
         
+        # Count domain-specific keywords
         finance_keywords = ['budget', 'cost', 'expense', 'revenue', 'amount', 'payment', 'vendor', 'invoice']
         hr_keywords = ['employee', 'staff', 'leave', 'performance', 'salary', 'department', 'hire', 'turnover']
         ops_keywords = ['process', 'efficiency', 'service', 'delivery', 'issue', 'ticket', 'procurement', 'operation']
@@ -412,8 +434,9 @@ class QuestionGenerator:
         for line in lines:
             line = line.strip()
             if line and any(line.startswith(str(i)) for i in range(1, 10)):
+                # Remove numbering and clean up
                 question = line.split('.', 1)[-1].strip()
-                if question and len(question) > 10:
+                if question and len(question) > 10:  # Filter out very short responses
                     questions.append(question)
         
         return questions
@@ -421,11 +444,9 @@ class QuestionGenerator:
     def _get_fallback_questions(self) -> List[str]:
         """Fallback questions if AI generation fails"""
         return [
-            "Main data patterns?",
-            "Any outliers detected?",
-            "Key trends identified?",
-            "Budget variances?",
-            "Performance metrics?"
+            "What are the main patterns in this dataset?",
+            "Are there any outliers or unusual values that need attention?",
+            "What trends can be identified in the data?"
         ]
 
 class TrustScoreCalculator:
@@ -436,18 +457,21 @@ class TrustScoreCalculator:
                             response_specificity: float, source_quality: float) -> Dict[str, Any]:
         """Calculate comprehensive trust score"""
         
+        # Weight factors
         weights = {
             'data_coverage': 0.4,
             'response_specificity': 0.3,
             'source_quality': 0.3
         }
         
+        # Calculate weighted score
         trust_score = (
             data_coverage * weights['data_coverage'] +
             response_specificity * weights['response_specificity'] +
             source_quality * weights['source_quality']
         )
         
+        # Determine confidence level
         if trust_score >= 0.9:
             confidence_level = "Very High"
             color = "green"
@@ -477,8 +501,8 @@ class AuditTrail:
         self.steps = []
     
     def add_step(self, step_type: str, description: str, data_used: List[str], 
-                timestamp: str = None, details: Dict[str, Any] = None):
-        """Add detailed step to audit trail"""
+                timestamp: str = None):
+        """Add step to audit trail"""
         if timestamp is None:
             timestamp = datetime.now().isoformat()
         
@@ -487,147 +511,18 @@ class AuditTrail:
             'step_type': step_type,
             'description': description,
             'data_used': data_used,
-            'details': details or {},
             'step_id': hashlib.md5(f"{timestamp}{description}".encode()).hexdigest()[:8]
         }
         self.steps.append(step)
         return step['step_id']
     
-    def add_data_analysis_step(self, df: pd.DataFrame, query: str, analysis_results: Dict):
-        """Add detailed data analysis step"""
-        details = {
-            'query_processed': query,
-            'datasets_analyzed': list(df['source_dataset'].unique()) if 'source_dataset' in df.columns else ['Combined Dataset'],
-            'total_records_processed': len(df),
-            'columns_analyzed': list(df.columns),
-            'data_quality_metrics': {
-                'completeness': round(1 - (df.isnull().sum().sum() / (len(df) * len(df.columns))), 3),
-                'missing_values_by_column': df.isnull().sum().to_dict(),
-                'data_types': {col: str(df[col].dtype) for col in df.columns}
-            },
-            'statistical_summary': analysis_results.get('summary_stats', {}).to_dict() if hasattr(analysis_results.get('summary_stats', {}), 'to_dict') else {},
-            'key_findings': self._extract_key_findings(df, query)
-        }
-        
-        return self.add_step(
-            "DETAILED_DATA_ANALYSIS", 
-            f"Comprehensive analysis of {len(df)} records across {len(df.columns)} columns for query: '{query[:50]}...'",
-            [f"Dataset with {len(df)} rows"],
-            details=details
-        )
-    
-    def add_ai_reasoning_step(self, query: str, context: str, ai_response: str, reasoning_process: Dict):
-        """Add detailed AI reasoning step"""
-        details = {
-            'original_query': query,
-            'context_provided': context[:500] + "..." if len(context) > 500 else context,
-            'reasoning_steps': reasoning_process.get('steps', []),
-            'data_points_referenced': reasoning_process.get('data_points', []),
-            'confidence_factors': reasoning_process.get('confidence_factors', {}),
-            'limitations_identified': reasoning_process.get('limitations', []),
-            'assumptions_made': reasoning_process.get('assumptions', []),
-            'response_generated': ai_response[:200] + "..." if len(ai_response) > 200 else ai_response
-        }
-        
-        return self.add_step(
-            "AI_REASONING_PROCESS",
-            f"AI reasoning for query analysis with {len(reasoning_process.get('steps', []))} logical steps",
-            ["User query", "Dataset context", "Statistical analysis"],
-            details=details
-        )
-    
-    def add_trust_calculation_step(self, trust_components: Dict, calculation_method: Dict):
-        """Add detailed trust score calculation step"""
-        details = {
-            'trust_components': trust_components,
-            'calculation_method': calculation_method,
-            'component_weights': {
-                'data_coverage': 0.4,
-                'response_specificity': 0.3,
-                'source_quality': 0.3
-            },
-            'final_score_calculation': self._show_trust_calculation(trust_components)
-        }
-        
-        return self.add_step(
-            "TRUST_SCORE_CALCULATION",
-            f"Trust score calculated: {trust_components.get('score', 0)} based on multiple factors",
-            ["Data quality metrics", "Response analysis", "Source reliability"],
-            details=details
-        )
-    
-    def _extract_key_findings(self, df: pd.DataFrame, query: str) -> List[str]:
-        """Extract key findings from data analysis"""
-        findings = []
-        
-        missing_data = df.isnull().sum()
-        if missing_data.sum() > 0:
-            findings.append(f"Missing data detected in {missing_data[missing_data > 0].count()} columns")
-        
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
-        if len(numeric_cols) > 0:
-            findings.append(f"Numerical analysis performed on {len(numeric_cols)} columns")
-        
-        query_words = query.lower().split()
-        matching_columns = [col for col in df.columns if any(word in col.lower() for word in query_words)]
-        if matching_columns:
-            findings.append(f"Query-relevant columns identified: {', '.join(matching_columns[:3])}")
-        
-        return findings
-    
-    def _show_trust_calculation(self, components: Dict) -> Dict:
-        """Show detailed trust score calculation"""
-        return {
-            'formula': '(data_coverage * 0.4) + (response_specificity * 0.3) + (source_quality * 0.3)',
-            'calculation': f"({components.get('data_coverage', 0)} * 0.4) + ({components.get('response_specificity', 0)} * 0.3) + ({components.get('source_quality', 0)} * 0.3)",
-            'result': components.get('score', 0)
-        }
-    
     def get_trail(self) -> List[Dict]:
         """Get complete audit trail"""
         return self.steps
 
-class DataExporter:
-    @staticmethod
-    def export_conversation_history(conversation_history: List[Dict]) -> str:
-        """Export conversation history to CSV format"""
-        if not conversation_history:
-            return ""
-        
-        df = pd.DataFrame(conversation_history)
-        return df.to_csv(index=False)
-    
-    @staticmethod
-    def export_conversation_history_json(conversation_history: List[Dict]) -> str:
-        """Export conversation history to JSON format"""
-        return json.dumps(conversation_history, indent=2, ensure_ascii=False)
-    
-    @staticmethod
-    def export_audit_trail(audit_trail: List[Dict]) -> str:
-        """Export audit trail to CSV format"""
-        if not audit_trail:
-            return ""
-        
-        flattened_data = []
-        for step in audit_trail:
-            flattened_data.append({
-                'step_id': step['step_id'],
-                'timestamp': step['timestamp'],
-                'step_type': step['step_type'],
-                'description': step['description'],
-                'data_used': '; '.join(step['data_used'])
-            })
-        
-        df = pd.DataFrame(flattened_data)
-        return df.to_csv(index=False)
-    
-    @staticmethod
-    def export_audit_trail_json(audit_trail: List[Dict]) -> str:
-        """Export audit trail to JSON format"""
-        return json.dumps(audit_trail, indent=2, ensure_ascii=False)
-
 class ConversationalAI:
     def __init__(self, api_key: str):
+        # Updated for OpenAI v1.0+
         self.client = OpenAI(api_key=api_key)
         self.trust_calculator = TrustScoreCalculator()
         self.audit = AuditTrail()
@@ -635,9 +530,11 @@ class ConversationalAI:
     def analyze_data(self, df: pd.DataFrame, query: str) -> Dict[str, Any]:
         """Analyze data based on user query"""
         
+        # Add audit step
         self.audit.add_step("DATA_ANALYSIS", f"Analyzing data for query: {query}", 
                            [f"Dataset with {len(df)} rows, {len(df.columns)} columns"])
         
+        # Basic data analysis
         analysis = {
             'summary_stats': df.describe() if not df.empty else None,
             'column_info': {col: str(df[col].dtype) for col in df.columns} if not df.empty else {},
@@ -648,63 +545,54 @@ class ConversationalAI:
         return analysis
     
     def generate_response(self, query: str, data_analysis: Dict, df: pd.DataFrame) -> Dict[str, Any]:
-        """Generate AI response with detailed audit trail"""
+        """Generate AI response based on data analysis"""
+        
+        # Add audit step
+        self.audit.add_step("AI_GENERATION", "Generating AI response", 
+                           ["Data analysis results", "User query"])
         
         try:
-            step_id_analysis = self.audit.add_data_analysis_step(df, query, data_analysis)
-            
+            # Create context from data
             context = self._create_context(data_analysis, df)
             
-            reasoning_process = self._create_reasoning_process(query, df, data_analysis)
+            # Create prompt
+            prompt = self._create_prompt(query, context)
             
-            prompt = self._create_detailed_prompt(query, context, reasoning_process)
-            
+            # Generate response using OpenAI v1.0+
             response = self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "You are a government data analyst AI. Provide accurate, factual responses based only on the provided data. Always cite specific data points and be transparent about limitations."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=250,
+                max_tokens=500,
                 temperature=0.1
             )
             
             ai_response = response.choices[0].message.content
             
-            step_id_reasoning = self.audit.add_ai_reasoning_step(query, context, ai_response, reasoning_process)
-            
+            # Calculate trust score
             data_coverage = self._calculate_data_coverage(query, df)
             response_specificity = self._calculate_response_specificity(ai_response)
             source_quality = self._calculate_source_quality(df)
             
-            trust_components = {
-                'data_coverage': data_coverage,
-                'response_specificity': response_specificity,
-                'source_quality': source_quality
-            }
-            
-            calculation_method = {
-                'data_coverage_method': 'Keyword overlap between query and dataset columns',
-                'response_specificity_method': 'Response length and numerical content analysis',
-                'source_quality_method': 'Data completeness and consistency metrics'
-            }
-            
             trust_score = self.trust_calculator.calculate_trust_score(
                 query, data_coverage, response_specificity, source_quality
             )
-            trust_score['components'] = trust_components
             
-            step_id_trust = self.audit.add_trust_calculation_step(trust_components, calculation_method)
+            # Add audit step
+            self.audit.add_step("TRUST_CALCULATION", f"Trust score calculated: {trust_score['score']}", 
+                               ["AI response", "Data quality metrics"])
             
             return {
                 'response': ai_response,
                 'trust_score': trust_score,
                 'audit_trail': self.audit.get_trail(),
-                'data_sources_used': list(df['source_dataset'].unique()) if 'source_dataset' in df.columns else ['Combined Dataset'],
-                'reasoning_process': reasoning_process
+                'data_sources_used': list(df['source_dataset'].unique()) if 'source_dataset' in df.columns else ['Combined Dataset']
             }
             
         except Exception as e:
+            # Fixed trust score structure for error cases
             error_trust_score = {
                 'score': 0.0, 
                 'confidence_level': 'Error', 
@@ -719,99 +607,9 @@ class ConversationalAI:
                 'response': f"Error generating response: {str(e)}",
                 'trust_score': error_trust_score,
                 'audit_trail': self.audit.get_trail(),
-                'data_sources_used': [],
-                'reasoning_process': {'error': str(e)}
+                'data_sources_used': []
             }
-
-    def _create_reasoning_process(self, query: str, df: pd.DataFrame, analysis: Dict) -> Dict[str, Any]:
-        """Create detailed reasoning process for AI analysis"""
-        
-        reasoning = {
-            'steps': [],
-            'data_points': [],
-            'confidence_factors': {},
-            'limitations': [],
-            'assumptions': []
-        }
-        
-        reasoning['steps'].append({
-            'step_number': 1,
-            'action': 'Query Analysis',
-            'description': f"Parsed user query: '{query}' to identify key information needs",
-            'outcome': f"Identified {len(query.split())} keywords for data matching"
-        })
-        
-        query_words = set(query.lower().split())
-        column_words = set(' '.join(df.columns).lower().split())
-        matches = query_words.intersection(column_words)
-        
-        reasoning['steps'].append({
-            'step_number': 2,
-            'action': 'Data Matching',
-            'description': f"Matched query keywords with available data columns",
-            'outcome': f"Found {len(matches)} direct matches: {list(matches) if matches else 'No direct matches'}"
-        })
-        
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
-        reasoning['steps'].append({
-            'step_number': 3,
-            'action': 'Statistical Analysis',
-            'description': f"Performed statistical analysis on {len(numeric_cols)} numerical columns",
-            'outcome': f"Generated descriptive statistics and identified data patterns"
-        })
-        
-        reasoning['data_points'] = [
-            f"Total records analyzed: {len(df)}",
-            f"Columns available: {len(df.columns)}",
-            f"Data completeness: {round(1 - (df.isnull().sum().sum() / (len(df) * len(df.columns))), 2) * 100}%"
-        ]
-        
-        reasoning['confidence_factors'] = {
-            'data_availability': 'High' if len(df) > 100 else 'Medium' if len(df) > 10 else 'Low',
-            'query_data_match': 'High' if matches else 'Medium',
-            'data_quality': 'High' if df.isnull().sum().sum() < len(df) * 0.1 else 'Medium'
-        }
-        
-        if df.empty:
-            reasoning['limitations'].append("No data available for analysis")
-        if not matches:
-            reasoning['limitations'].append("No direct keyword matches between query and data columns")
-        if df.isnull().sum().sum() > len(df) * 0.2:
-            reasoning['limitations'].append("Significant missing data may affect accuracy")
-        
-        reasoning['assumptions'].append("Data provided is accurate and up-to-date")
-        reasoning['assumptions'].append("User query relates to available dataset columns")
-        if len(df) < 1000:
-            reasoning['assumptions'].append("Small dataset size - results may not be fully representative")
-        
-        return reasoning
-
-    def _create_detailed_prompt(self, query: str, context: str, reasoning: Dict) -> str:
-        """Create detailed prompt with reasoning context"""
-        return f"""
-        Based on the following government dataset and detailed analysis process, please answer the user's question:
-        
-        Data Context:
-        {context}
-        
-        Analysis Process Completed:
-        {json.dumps(reasoning['steps'], indent=2)}
-        
-        Key Data Points:
-        {chr(10).join(reasoning['data_points'])}
-        
-        Confidence Factors:
-        {json.dumps(reasoning['confidence_factors'], indent=2)}
-        
-        User Question: {query}
-        
-        Guidelines:
-        - Answer in 60-80 words maximum
-        - Give key numbers and findings only
-        - Be direct and factual
-        - Skip detailed explanations
-        """
-
+    
     def _create_context(self, analysis: Dict, df: pd.DataFrame) -> str:
         """Create context string from data analysis"""
         context_parts = []
@@ -820,25 +618,46 @@ class ConversationalAI:
             context_parts.append(f"Dataset contains {len(df)} rows and {len(df.columns)} columns.")
             context_parts.append(f"Columns: {', '.join(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
             
+            # Add sample data
             sample_data = df.head(3).to_string()
             context_parts.append(f"Sample data:\n{sample_data}")
         
         return "\n".join(context_parts)
+    
+    def _create_prompt(self, query: str, context: str) -> str:
+        """Create prompt for OpenAI"""
+        return f"""
+        Based on the following government dataset information, please answer the user's question accurately and concisely.
+        
+        Data Context:
+        {context}
+        
+        User Question: {query}
+        
+        Guidelines:
+        - Only use information from the provided dataset
+        - Be specific and cite data points where possible
+        - If the data doesn't contain information to answer the question, say so clearly
+        - Focus on accuracy over completeness
+        - Highlight any limitations or caveats
+        """
     
     def _calculate_data_coverage(self, query: str, df: pd.DataFrame) -> float:
         """Calculate how well the data covers the query"""
         if df.empty:
             return 0.0
         
+        # Simple heuristic based on query keywords present in columns
         query_words = set(query.lower().split())
         column_words = set(' '.join(df.columns).lower().split())
         
         overlap = len(query_words.intersection(column_words))
         coverage = min(overlap / len(query_words) if query_words else 0, 1.0)
-        return max(coverage, 0.5)
+        return max(coverage, 0.5)  # Minimum 50% if data exists
     
     def _calculate_response_specificity(self, response: str) -> float:
         """Calculate response specificity"""
+        # Simple heuristic based on response length and presence of numbers
         word_count = len(response.split())
         has_numbers = any(char.isdigit() for char in response)
         
@@ -853,90 +672,28 @@ class ConversationalAI:
         if df.empty:
             return 0.0
         
+        # Calculate based on completeness and consistency
         completeness = 1 - (df.isnull().sum().sum() / (len(df) * len(df.columns)))
         quality = completeness
         
         return max(quality, 0.7)
 
+# Main Streamlit App
 def main():
-    if not st.session_state.logged_in:
-        show_login()
-        return
-    
-    with st.sidebar:
-        st.image("australian-government.png", width=200)
-        st.markdown("---")
-        
-        st.write(f"👤 **{st.session_state.username}**")
-        if st.button("🚪 Logout"):
-            st.session_state.logged_in = False
-            st.session_state.username = ""
-            st.rerun()
-        st.markdown("---")
-    
-    main_app()
-
-def show_login():
-    st.title("🔐 Government Data AI")
-    
-    db = UserDB()
-    
-    tab1, tab2 = st.tabs(["🔑 Login", "📝 Register"])
-    
-    with tab1:
-        col1, col2, col3 = st.columns([1,2,1])
-        with col2:
-            with st.form("login_form"):
-                st.markdown("### Demo Account")
-                st.info("Username: **admin** | Password: **admin123**")
-                
-                username = st.text_input("Username", value="admin")
-                password = st.text_input("Password", type="password", value="admin123")
-                
-                if st.form_submit_button("🚀 Login", type="primary"):
-                    if db.verify_user(username, password):
-                        st.session_state.logged_in = True
-                        st.session_state.username = username
-                        st.success("✅ Login successful!")
-                        st.rerun()
-                    else:
-                        st.error("❌ Invalid credentials!")
-    
-    with tab2:
-        col1, col2, col3 = st.columns([1,2,1])
-        with col2:
-            with st.form("register_form"):
-                st.markdown("### Create New Account")
-                
-                new_username = st.text_input("Username", placeholder="Username (3-20 characters)")
-                new_full_name = st.text_input("Full Name", placeholder="Enter your full name")
-                new_password = st.text_input("Password", type="password", placeholder="Password (minimum 6 characters)")
-                confirm_password = st.text_input("Confirm Password", type="password", placeholder="Re-enter password")
-                
-                if st.form_submit_button("📝 Register", type="primary"):
-                    if not all([new_username, new_password, confirm_password]):
-                        st.error("❌ Please fill in all information!")
-                    elif len(new_username) < 3 or len(new_username) > 20:
-                        st.error("❌ Username must be 3-20 characters!")
-                    elif len(new_password) < 6:
-                        st.error("❌ Password must be at least 6 characters!")
-                    elif new_password != confirm_password:
-                        st.error("❌ Passwords do not match!")
-                    else:
-                        if db.create_user(new_username, new_password, new_full_name):
-                            st.success("✅ Registration successful! Please switch to Login tab.")
-                            st.balloons()
-                        else:
-                            st.error("❌ Username already exists!")
-
-def main_app():
-    
     st.title("🏛️ Government Data Conversational AI")
     st.markdown("### Accurate and Trustworthy Chatbot for Data Interactions")
     
+    # Sidebar for configuration
     st.sidebar.header("Configuration")
+    
+    # Show API status in sidebar
     st.sidebar.success("🔑 OpenAI API: Connected")
     
+    # # Add some useful info in sidebar
+    # st.sidebar.info("📋 The AI will automatically detect connections between your datasets and generate relevant questions.")
+    # st.sidebar.info("📊 ProfileReports are generated automatically for data visualization and analysis.")
+    
+    # Data upload section
     st.header("📊 Data Upload")
     uploaded_files = st.file_uploader(
         "Upload your government datasets (CSV, Excel)",
@@ -950,15 +707,18 @@ def main_app():
         profile_generator = ProfileReportGenerator()
         datasets = {}
         
+        # Check if files have changed
         current_files_hash = processor.get_files_hash(uploaded_files)
         files_changed = current_files_hash != st.session_state.uploaded_files_hash
         
         if files_changed:
+            # Reset questions and profile reports when files change
             st.session_state.suggested_questions = []
             st.session_state.dataset_questions = {}
             st.session_state.profile_reports = {}
             st.session_state.uploaded_files_hash = current_files_hash
         
+        # Process each uploaded file
         for uploaded_file in uploaded_files:
             df, metadata = processor.load_file(uploaded_file)
             if df is not None:
@@ -966,18 +726,24 @@ def main_app():
                 st.session_state.data_sources[uploaded_file.name] = metadata
         
         if datasets:
+            # Combine datasets
             combined_df = processor.combine_datasets(datasets)
             
+            # Display data overview
             st.metric("📁 Data Sources", len(datasets))
             
+            # Data Sources Preview with ProfileReport
             st.header("📋 Data Sources & Analysis")
             
+            # Create tabs or expandable sections for each data source
             if len(datasets) == 1:
+                # Single dataset - show directly
                 dataset_name = list(datasets.keys())[0]
                 df = datasets[dataset_name]
                 metadata = st.session_state.data_sources[dataset_name]
                 
                 with st.expander(f"📄 {dataset_name}", expanded=True):
+                    # Dataset metrics
                     col1, col2, col3 = st.columns(3)
                     with col1:
                         st.metric("Records", metadata['rows'])
@@ -987,6 +753,7 @@ def main_app():
                         file_size = f"{metadata['size'] / 1024:.1f} KB" if metadata['size'] < 1024*1024 else f"{metadata['size'] / (1024*1024):.1f} MB"
                         st.metric("Size", file_size)
                     
+                    # Tabs for different views
                     tab1, tab2, tab3 = st.tabs(["📋 Preview", "📊 Profile Report", "ℹ️ Info"])
                     
                     with tab1:
@@ -1003,6 +770,7 @@ def main_app():
                                 if profile:
                                     st.session_state.profile_reports[dataset_name] = profile
                         
+                        # Display profile report if it exists
                         if dataset_name in st.session_state.profile_reports:
                             profile_generator.display_profile_report(
                                 st.session_state.profile_reports[dataset_name], 
@@ -1018,10 +786,12 @@ def main_app():
                         st.write(f"- **File Size:** {file_size}")
             
             else:
+                # Multiple datasets - show as expandable sections
                 for dataset_name, df in datasets.items():
                     metadata = st.session_state.data_sources[dataset_name]
                     
                     with st.expander(f"📄 {dataset_name}"):
+                        # Dataset metrics
                         col1, col2, col3 = st.columns(3)
                         with col1:
                             st.metric("Records", metadata['rows'])
@@ -1031,6 +801,7 @@ def main_app():
                             file_size = f"{metadata['size'] / 1024:.1f} KB" if metadata['size'] < 1024*1024 else f"{metadata['size'] / (1024*1024):.1f} MB"
                             st.metric("Size", file_size)
                         
+                        # Tabs for different views
                         tab1, tab2, tab3 = st.tabs(["📋 Preview", "📊 Profile Report", "ℹ️ Info"])
                         
                         with tab1:
@@ -1048,6 +819,7 @@ def main_app():
                                         st.session_state.profile_reports[dataset_name] = profile
                                         st.success("✅ Profile report generated successfully!")
                             
+                            # Display profile report if it exists
                             if dataset_name in st.session_state.profile_reports:
                                 profile_generator.display_profile_report(
                                     st.session_state.profile_reports[dataset_name], 
@@ -1062,19 +834,23 @@ def main_app():
                             st.write(f"- **Columns:** {len(metadata['columns'])}")
                             st.write(f"- **File Size:** {file_size}")
             
+            # Generate AI-powered question suggestions
             if not st.session_state.suggested_questions:
                 with st.spinner("🤖 AI is analyzing your datasets and their connections to generate relevant questions..."):
                     try:
                         question_generator = QuestionGenerator(OPENAI_API_KEY)
                         
+                        # Generate questions for all datasets
                         all_questions = question_generator.generate_questions_for_datasets(datasets)
                         st.session_state.dataset_questions = all_questions
                         
+                        # Select top 5 questions
                         selected_questions = question_generator.select_top_questions(all_questions, 5)
                         st.session_state.suggested_questions = selected_questions
                         
                     except Exception as e:
                         st.warning(f"Unable to generate AI questions: {str(e)}")
+                        # Use fallback questions
                         st.session_state.suggested_questions = [
                             "What are the main patterns across all datasets?",
                             "Are there any correlations between different data sources?",
@@ -1083,35 +859,36 @@ def main_app():
                             "What insights emerge from combining these datasets?"
                         ]
             
+            # Question scaffolding
             st.header("❓ Question Guidance")
             
             if st.session_state.suggested_questions:
                 st.markdown("**🤖 AI-Generated Questions Based on Your Data:**")
                 
+                # Show information about question generation
                 if len(datasets) > 1:
                     st.info(f"📊 These questions were generated by analyzing {len(datasets)} datasets and their connections. Cross-dataset questions are prioritized to help you find relationships between different data sources.")
                 else:
                     st.info("📊 These questions were automatically generated by analyzing your uploaded dataset.")
                 
-                num_questions = len(st.session_state.suggested_questions)
-                
-                if num_questions <= 3:
-                    cols = st.columns(num_questions)
-                    for i, question in enumerate(st.session_state.suggested_questions):
-                        with cols[i]:
-                            if st.button(f"📝 {question}", key=f"ai_question_{i}"):
-                                st.session_state.user_question = question
-                else:
-                    questions_per_row = 3
-                    for row in range(0, num_questions, questions_per_row):
-                        row_questions = st.session_state.suggested_questions[row:row + questions_per_row]
-                        cols = st.columns(len(row_questions))
-                        
-                        for i, question in enumerate(row_questions):
-                            with cols[i]:
-                                if st.button(f"📝 {question}", key=f"ai_question_{row + i}"):
-                                    st.session_state.user_question = question
-                        
+                for i, question in enumerate(st.session_state.suggested_questions):
+                    if st.button(f"📝 {question}", key=f"ai_question_{i}"):
+                        st.session_state.user_question = question
+            
+            # Show detailed question breakdown in expander
+            if st.session_state.dataset_questions:
+                with st.expander("🔍 View All Generated Questions by Source", expanded=False):
+                    for source, questions in st.session_state.dataset_questions.items():
+                        if questions:
+                            if source == 'cross_dataset':
+                                st.markdown(f"**🔗 Cross-Dataset Analysis Questions:**")
+                            else:
+                                st.markdown(f"**📄 Questions for {source}:**")
+                            for j, q in enumerate(questions, 1):
+                                st.write(f"{j}. {q}")
+                            st.markdown("---")
+            
+            # Reset questions button
             if st.session_state.suggested_questions:
                 col1, col2 = st.columns(2)
                 with col1:
@@ -1134,6 +911,7 @@ def main_app():
                                 st.session_state.suggested_questions = all_questions_flat
                             st.rerun()
             
+            # Query input
             st.header("💬 Ask Your Question")
             user_question = st.text_area(
                 "Enter your question about the data:",
@@ -1145,14 +923,19 @@ def main_app():
             if st.button("🔍 Analyze Data", type="primary") and user_question:
                 with st.spinner("Analyzing data and generating response..."):
                     try:
+                        # Initialize AI
                         ai = ConversationalAI(OPENAI_API_KEY)
                         
+                        # Analyze data
                         analysis = ai.analyze_data(combined_df, user_question)
                         
+                        # Generate response
                         result = ai.generate_response(user_question, analysis, combined_df)
                         
+                        # Display results
                         st.header("🤖 AI Response")
                         
+                        # Trust score display
                         trust_info = result['trust_score']
                         col1, col2 = st.columns([3, 1])
                         
@@ -1166,6 +949,7 @@ def main_app():
                                       f"<small>{trust_info['confidence_level']}</small></div>", 
                                       unsafe_allow_html=True)
                         
+                        # Trust score breakdown
                         with st.expander("🔍 Trust Score Breakdown"):
                             st.write("**Components:**")
                             if 'components' in trust_info:
@@ -1174,101 +958,18 @@ def main_app():
                             else:
                                 st.write("Trust score components not available")
                         
-                        col1, col2, col3 = st.columns([2, 1, 1])
-                        with col1:
-                            st.header("📋 Audit Trail")
-                        with col2:
-                            exporter = DataExporter()
-                            audit_csv = exporter.export_audit_trail(result['audit_trail'])
-                            if audit_csv:
-                                st.download_button(
-                                    label="📥 Download CSV",
-                                    data=audit_csv,
-                                    file_name=f"audit_trail_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                                    mime="text/csv",
-                                    help="Download audit trail as CSV file"
-                                )
-                        with col3:
-                            audit_json = exporter.export_audit_trail_json(result['audit_trail'])
-                            if audit_json:
-                                st.download_button(
-                                    label="📥 Download JSON",
-                                    data=audit_json,
-                                    file_name=f"audit_trail_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                                    mime="application/json",
-                                    help="Download audit trail as JSON file"
-                                )
-
+                        # Audit trail
+                        st.header("📋 Audit Trail")
                         audit_trail = result['audit_trail']
+                        
                         for i, step in enumerate(audit_trail):
-                            with st.expander(f"Step {i+1}: {step['step_type']} - {step['description'][:50]}...", expanded=False):
-                                
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    st.write(f"**Timestamp:** {step['timestamp']}")
-                                    st.write(f"**Step ID:** {step['step_id']}")
-                                with col2:
-                                    st.write(f"**Type:** {step['step_type']}")
-                                    st.write(f"**Data Used:** {', '.join(step['data_used'])}")
-                                
+                            with st.expander(f"Step {i+1}: {step['step_type']}", expanded=False):
                                 st.write(f"**Description:** {step['description']}")
-                                
-                                if 'details' in step and step['details']:
-                                    st.markdown("### 🔍 Detailed Analysis")
-                                    
-                                    details = step['details']
-                                    
-                                    if step['step_type'] == 'DETAILED_DATA_ANALYSIS':
-                                        st.markdown("**📊 Data Quality Metrics:**")
-                                        quality = details.get('data_quality_metrics', {})
-                                        st.write(f"- Completeness: {quality.get('completeness', 'N/A')}")
-                                        st.write(f"- Total Records: {details.get('total_records_processed', 'N/A')}")
-                                        st.write(f"- Columns Analyzed: {len(details.get('columns_analyzed', []))}")
-                                        
-                                        if quality.get('missing_values_by_column'):
-                                            st.markdown("**Missing Values by Column:**")
-                                            missing_df = pd.DataFrame(list(quality['missing_values_by_column'].items()), 
-                                                                    columns=['Column', 'Missing Count'])
-                                            st.dataframe(missing_df[missing_df['Missing Count'] > 0])
-                                        
-                                        if details.get('key_findings'):
-                                            st.markdown("**Key Findings:**")
-                                            for finding in details['key_findings']:
-                                                st.write(f"- {finding}")
-                                    
-                                    elif step['step_type'] == 'AI_REASONING_PROCESS':
-                                        st.markdown("**🧠 Reasoning Steps:**")
-                                        for reasoning_step in details.get('reasoning_steps', []):
-                                            st.write(f"**Step {reasoning_step.get('step_number')}:** {reasoning_step.get('action')}")
-                                            st.write(f"   - {reasoning_step.get('description')}")
-                                            st.write(f"   - Outcome: {reasoning_step.get('outcome')}")
-                                        
-                                        st.markdown("**📈 Confidence Factors:**")
-                                        for factor, level in details.get('confidence_factors', {}).items():
-                                            st.write(f"- {factor.replace('_', ' ').title()}: {level}")
-                                        
-                                        if details.get('limitations_identified'):
-                                            st.markdown("**⚠️ Limitations Identified:**")
-                                            for limitation in details['limitations_identified']:
-                                                st.write(f"- {limitation}")
-                                        
-                                        if details.get('assumptions_made'):
-                                            st.markdown("**💭 Assumptions Made:**")
-                                            for assumption in details['assumptions_made']:
-                                                st.write(f"- {assumption}")
-                                    
-                                    elif step['step_type'] == 'TRUST_SCORE_CALCULATION':
-                                        st.markdown("**🎯 Trust Score Breakdown:**")
-                                        calc = details.get('final_score_calculation', {})
-                                        st.write(f"**Formula:** {calc.get('formula', 'N/A')}")
-                                        st.write(f"**Calculation:** {calc.get('calculation', 'N/A')}")
-                                        st.write(f"**Result:** {calc.get('result', 'N/A')}")
-                                        
-                                        st.markdown("**Component Weights:**")
-                                        weights = details.get('component_weights', {})
-                                        for component, weight in weights.items():
-                                            st.write(f"- {component.replace('_', ' ').title()}: {weight}")
-
+                                st.write(f"**Timestamp:** {step['timestamp']}")
+                                st.write(f"**Data Used:** {', '.join(step['data_used'])}")
+                                st.write(f"**Step ID:** {step['step_id']}")
+                        
+                        # Data sources used
                         st.header("📊 Data Sources Used in Analysis")
                         sources_used = result['data_sources_used']
                         for source in sources_used:
@@ -1284,6 +985,7 @@ def main_app():
                                         file_size = f"{metadata['size'] / 1024:.1f} KB" if metadata['size'] < 1024*1024 else f"{metadata['size'] / (1024*1024):.1f} MB"
                                         st.write(f"**File Size:** {file_size}")
                         
+                        # Save to conversation history
                         st.session_state.conversation_history.append({
                             'question': user_question,
                             'response': result['response'],
@@ -1295,41 +997,20 @@ def main_app():
                         st.error(f"Error: {str(e)}")
                         st.write("Please check your API key configuration.")
             
+            # Conversation history
             if st.session_state.conversation_history:
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1:
-                    st.header("📜 Conversation History")
-                with col2:
-                    exporter = DataExporter()
-                    csv_data = exporter.export_conversation_history(st.session_state.conversation_history)
-                    if csv_data:
-                        st.download_button(
-                            label="📥 Download CSV",
-                            data=csv_data,
-                            file_name=f"conversation_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv",
-                            help="Download conversation history as CSV file"
-                        )
-                with col3:
-                    json_data = exporter.export_conversation_history_json(st.session_state.conversation_history)
-                    if json_data:
-                        st.download_button(
-                            label="📥 Download JSON",
-                            data=json_data,
-                            file_name=f"conversation_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                            mime="application/json",
-                            help="Download conversation history as JSON file"
-                        )
-                
+                st.header("📜 Conversation History")
                 for i, conv in enumerate(reversed(st.session_state.conversation_history)):
                     with st.expander(f"Q{len(st.session_state.conversation_history)-i}: {conv['question'][:100]}..."):
                         st.write(f"**Question:** {conv['question']}")
                         st.write(f"**Response:** {conv['response']}")
                         st.write(f"**Trust Score:** {conv['trust_score']}")
                         st.write(f"**Time:** {conv['timestamp']}")
+    
     else:
         st.info("👆 Please upload your government datasets to begin analysis.")
         
+        # Show example datasets structure
         st.header("📋 Expected Data Formats")
         
         example_data = {
