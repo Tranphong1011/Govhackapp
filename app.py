@@ -475,13 +475,11 @@ class DataAnalysisEngine:
             'data_found': False
         }
         
-        # Phân tích từ khóa trong query
+
         query_lower = query.lower()
-        
-        # Tìm columns có liên quan
+
         relevant_columns = self._find_relevant_columns(df, query_lower)
-        
-        # Thực hiện các phép toán dựa trên query
+
         if 'how many' in query_lower or 'count' in query_lower:
             results.update(self._handle_count_queries(df, query_lower, relevant_columns))
         
@@ -490,8 +488,7 @@ class DataAnalysisEngine:
         
         if 'sum' in query_lower or 'total' in query_lower:
             results.update(self._handle_sum_queries(df, query_lower, relevant_columns))
-        
-        # Tìm kiếm giá trị cụ thể
+
         results.update(self._search_specific_values(df, query_lower))
         
         return results
@@ -503,7 +500,7 @@ class DataAnalysisEngine:
         
         for col in df.columns:
             col_lower = col.lower()
-            # Kiểm tra từ khóa trong tên column
+
             for word in query_words:
                 if word in col_lower or col_lower in word:
                     relevant_cols.append(col)
@@ -515,7 +512,7 @@ class DataAnalysisEngine:
         """Xử lý câu hỏi đếm số lượng"""
         results = {'count_results': []}
         
-        # Tìm giá trị cần đếm trong query
+
         for col in df.columns:
             if df[col].dtype == 'object':  # Text columns
                 unique_values = df[col].unique()
@@ -622,7 +619,7 @@ class AuditTrail:
     
     def add_data_analysis_step(self, df: pd.DataFrame, query: str, analysis_results: Dict):
         """Add detailed data analysis step"""
-        # Thêm kiểm tra None
+
         if analysis_results is None:
             analysis_results = {}
         
@@ -636,7 +633,7 @@ class AuditTrail:
                 'missing_values_by_column': df.isnull().sum().to_dict(),
                 'data_types': {col: str(df[col].dtype) for col in df.columns}
             },
-            # Sửa lỗi ở đây
+
             'statistical_summary': analysis_results.get('summary_stats', {}).to_dict() if hasattr(analysis_results.get('summary_stats', {}), 'to_dict') else analysis_results.get('summary_stats', {}),
             'key_findings': self._extract_key_findings(df, query)
         }
@@ -651,7 +648,7 @@ class AuditTrail:
     
     def add_ai_reasoning_step(self, query: str, context: str, ai_response: str, reasoning_process: Dict):
         """Add detailed AI reasoning step"""
-        # Kiểm tra None
+
         if reasoning_process is None:
             reasoning_process = {}
         
@@ -772,7 +769,7 @@ class ConversationalAI:
     def analyze_data(self, df: pd.DataFrame, query: str) -> Dict[str, Any]:
         """Phân tích dữ liệu chi tiết dựa trên query"""
         
-        # Thêm Data Analysis Engine
+
         analysis_engine = DataAnalysisEngine()
         query_results = analysis_engine.execute_query_analysis(df, query)
         
@@ -787,7 +784,7 @@ class ConversationalAI:
         """Generate AI response with detailed audit trail"""
         
         try:
-            # Đảm bảo data_analysis không None
+ 
             if data_analysis is None:
                 data_analysis = {}
             
@@ -797,7 +794,7 @@ class ConversationalAI:
             
             reasoning_process = self._create_reasoning_process(query, df, data_analysis)
             
-            # Đảm bảo reasoning_process không None
+   
             if reasoning_process is None:
                 reasoning_process = {
                     'steps': [],
@@ -809,7 +806,7 @@ class ConversationalAI:
             
             prompt = self._create_detailed_prompt(query, context, reasoning_process)
             
-            # Thêm try-catch cho OpenAI API call
+
             try:
                 response = self.client.chat.completions.create(
                     model="gpt-3.5-turbo",
@@ -821,7 +818,7 @@ class ConversationalAI:
                     temperature=0.1
                 )
                 
-                # Kiểm tra response
+
                 if response and response.choices and len(response.choices) > 0:
                     ai_response = response.choices[0].message.content
                 else:
@@ -852,7 +849,7 @@ class ConversationalAI:
                 query, data_coverage, response_specificity, source_quality
             )
             
-            # Đảm bảo trust_score không None
+
             if trust_score is None:
                 trust_score = {
                     'score': 0.0,
@@ -993,25 +990,25 @@ class ConversationalAI:
             context_parts.append(f"Dataset contains {len(df)} rows and {len(df.columns)} columns.")
             context_parts.append(f"Columns: {', '.join(df.columns)}")
             
-            # Thêm kết quả phân tích query
+
             query_analysis = analysis.get('query_analysis', {})
             
             if query_analysis.get('data_found'):
                 context_parts.append("\n=== DIRECT DATA ANALYSIS RESULTS ===")
                 
-                # Thêm kết quả đếm
+ 
                 if query_analysis.get('count_results'):
                     context_parts.append("COUNT RESULTS:")
                     for result in query_analysis['count_results']:
                         context_parts.append(f"- {result['question']}: {result['answer']}")
                 
-                # Thêm kết quả tìm kiếm giá trị
+
                 if query_analysis.get('value_matches'):
                     context_parts.append("VALUE MATCHES:")
                     for match in query_analysis['value_matches']:
                         context_parts.append(f"- {match['column']} '{match['value']}': {match['count']} records ({match['percentage']}%)")
             
-            # Chỉ show sample data nếu không có kết quả cụ thể
+
             if not query_analysis.get('data_found'):
                 sample_data = df.head(5).to_string()
                 context_parts.append(f"\nSample data:\n{sample_data}")
@@ -1023,19 +1020,19 @@ class ConversationalAI:
         if df.empty:
             return 0.0
         
-        # Phân tích query để tìm kết quả thực tế
+
         analysis_engine = DataAnalysisEngine()
         query_results = analysis_engine.execute_query_analysis(df, query)
         
-        # Nếu tìm thấy kết quả cụ thể
+
         if query_results.get('data_found'):
-            return 0.95  # High coverage vì có thể trả lời cụ thể
+            return 0.95  
         
-        # Fallback: kiểm tra keyword overlap
+
         query_words = set(query.lower().split())
         column_words = set(' '.join(df.columns).lower().split())
         
-        # Kiểm tra content trong data
+
         content_words = set()
         for col in df.columns:
             if df[col].dtype == 'object':
