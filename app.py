@@ -427,6 +427,98 @@ class QuestionGenerator:
             "Budget variances?",
             "Performance metrics?"
         ]
+class DataAnalysisEngine:
+    def __init__(self):
+        pass
+    
+    def execute_query_analysis(self, df: pd.DataFrame, query: str) -> Dict[str, Any]:
+        """Thực hiện phân tích dữ liệu thực tế dựa trên query"""
+        results = {
+            'direct_answers': [],
+            'relevant_data': {},
+            'statistical_insights': {},
+            'data_found': False
+        }
+        
+        # Phân tích từ khóa trong query
+        query_lower = query.lower()
+        
+        # Tìm columns có liên quan
+        relevant_columns = self._find_relevant_columns(df, query_lower)
+        
+        # Thực hiện các phép toán dựa trên query
+        if 'how many' in query_lower or 'count' in query_lower:
+            results.update(self._handle_count_queries(df, query_lower, relevant_columns))
+        
+        if 'average' in query_lower or 'mean' in query_lower:
+            results.update(self._handle_average_queries(df, query_lower, relevant_columns))
+        
+        if 'sum' in query_lower or 'total' in query_lower:
+            results.update(self._handle_sum_queries(df, query_lower, relevant_columns))
+        
+        # Tìm kiếm giá trị cụ thể
+        results.update(self._search_specific_values(df, query_lower))
+        
+        return results
+    
+    def _find_relevant_columns(self, df: pd.DataFrame, query: str) -> List[str]:
+        """Tìm columns liên quan đến query"""
+        relevant_cols = []
+        query_words = query.split()
+        
+        for col in df.columns:
+            col_lower = col.lower()
+            # Kiểm tra từ khóa trong tên column
+            for word in query_words:
+                if word in col_lower or col_lower in word:
+                    relevant_cols.append(col)
+                    break
+        
+        return relevant_cols
+    
+    def _handle_count_queries(self, df: pd.DataFrame, query: str, relevant_columns: List[str]) -> Dict:
+        """Xử lý câu hỏi đếm số lượng"""
+        results = {'count_results': []}
+        
+        # Tìm giá trị cần đếm trong query
+        for col in df.columns:
+            if df[col].dtype == 'object':  # Text columns
+                unique_values = df[col].unique()
+                for value in unique_values:
+                    if str(value).lower() in query:
+                        count = len(df[df[col] == value])
+                        results['count_results'].append({
+                            'question': f"How many {col} = {value}",
+                            'answer': count,
+                            'column': col,
+                            'value': value
+                        })
+                        results['data_found'] = True
+        
+        return results
+    
+    def _search_specific_values(self, df: pd.DataFrame, query: str) -> Dict:
+        """Tìm kiếm giá trị cụ thể trong data"""
+        results = {'value_matches': []}
+        
+        query_words = [word.strip('?.,!') for word in query.split()]
+        
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                for value in df[col].unique():
+                    value_str = str(value).lower()
+                    for word in query_words:
+                        if word.lower() in value_str or value_str in word.lower():
+                            count = len(df[df[col] == value])
+                            results['value_matches'].append({
+                                'column': col,
+                                'value': value,
+                                'count': count,
+                                'percentage': round(count/len(df)*100, 1)
+                            })
+                            results['data_found'] = True
+        
+        return results
 
 class TrustScoreCalculator:
     def __init__(self):
@@ -495,6 +587,10 @@ class AuditTrail:
     
     def add_data_analysis_step(self, df: pd.DataFrame, query: str, analysis_results: Dict):
         """Add detailed data analysis step"""
+        # Thêm kiểm tra None
+        if analysis_results is None:
+            analysis_results = {}
+        
         details = {
             'query_processed': query,
             'datasets_analyzed': list(df['source_dataset'].unique()) if 'source_dataset' in df.columns else ['Combined Dataset'],
@@ -505,7 +601,8 @@ class AuditTrail:
                 'missing_values_by_column': df.isnull().sum().to_dict(),
                 'data_types': {col: str(df[col].dtype) for col in df.columns}
             },
-            'statistical_summary': analysis_results.get('summary_stats', {}).to_dict() if hasattr(analysis_results.get('summary_stats', {}), 'to_dict') else {},
+            # Sửa lỗi ở đây
+            'statistical_summary': analysis_results.get('summary_stats', {}).to_dict() if hasattr(analysis_results.get('summary_stats', {}), 'to_dict') else analysis_results.get('summary_stats', {}),
             'key_findings': self._extract_key_findings(df, query)
         }
         
@@ -515,9 +612,14 @@ class AuditTrail:
             [f"Dataset with {len(df)} rows"],
             details=details
         )
+
     
     def add_ai_reasoning_step(self, query: str, context: str, ai_response: str, reasoning_process: Dict):
         """Add detailed AI reasoning step"""
+        # Kiểm tra None
+        if reasoning_process is None:
+            reasoning_process = {}
+        
         details = {
             'original_query': query,
             'context_provided': context[:500] + "..." if len(context) > 500 else context,
@@ -535,7 +637,7 @@ class AuditTrail:
             ["User query", "Dataset context", "Statistical analysis"],
             details=details
         )
-    
+
     def add_trust_calculation_step(self, trust_components: Dict, calculation_method: Dict):
         """Add detailed trust score calculation step"""
         details = {
@@ -633,43 +735,65 @@ class ConversationalAI:
         self.audit = AuditTrail()
     
     def analyze_data(self, df: pd.DataFrame, query: str) -> Dict[str, Any]:
-        """Analyze data based on user query"""
+        """Phân tích dữ liệu chi tiết dựa trên query"""
         
-        self.audit.add_step("DATA_ANALYSIS", f"Analyzing data for query: {query}", 
-                           [f"Dataset with {len(df)} rows, {len(df.columns)} columns"])
+        # Thêm Data Analysis Engine
+        analysis_engine = DataAnalysisEngine()
+        query_results = analysis_engine.execute_query_analysis(df, query)
         
         analysis = {
             'summary_stats': df.describe() if not df.empty else None,
             'column_info': {col: str(df[col].dtype) for col in df.columns} if not df.empty else {},
             'missing_values': df.isnull().sum().to_dict() if not df.empty else {},
-            'unique_values': {col: df[col].nunique() for col in df.columns if df[col].dtype == 'object'} if not df.empty else {}
+            'unique_values': {col: df[col].nunique() for col in df.columns if df[col].dtype == 'object'} if not df.empty else {},
+            'query_analysis': query_results  # Thêm kết quả phân tích query
         }
-        
-        return analysis
-    
     def generate_response(self, query: str, data_analysis: Dict, df: pd.DataFrame) -> Dict[str, Any]:
         """Generate AI response with detailed audit trail"""
         
         try:
+            # Đảm bảo data_analysis không None
+            if data_analysis is None:
+                data_analysis = {}
+            
             step_id_analysis = self.audit.add_data_analysis_step(df, query, data_analysis)
             
             context = self._create_context(data_analysis, df)
             
             reasoning_process = self._create_reasoning_process(query, df, data_analysis)
             
+            # Đảm bảo reasoning_process không None
+            if reasoning_process is None:
+                reasoning_process = {
+                    'steps': [],
+                    'data_points': [],
+                    'confidence_factors': {},
+                    'limitations': [],
+                    'assumptions': []
+                }
+            
             prompt = self._create_detailed_prompt(query, context, reasoning_process)
             
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a government data analyst AI. Provide accurate, factual responses based only on the provided data. Always cite specific data points and be transparent about limitations."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=250,
-                temperature=0.1
-            )
-            
-            ai_response = response.choices[0].message.content
+            # Thêm try-catch cho OpenAI API call
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "You are a government data analyst AI. Provide accurate, factual responses based only on the provided data. Always cite specific data points and be transparent about limitations."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=250,
+                    temperature=0.1
+                )
+                
+                # Kiểm tra response
+                if response and response.choices and len(response.choices) > 0:
+                    ai_response = response.choices[0].message.content
+                else:
+                    ai_response = "Unable to generate response from AI model."
+                    
+            except Exception as api_error:
+                ai_response = f"AI API Error: {str(api_error)}"
             
             step_id_reasoning = self.audit.add_ai_reasoning_step(query, context, ai_response, reasoning_process)
             
@@ -692,7 +816,17 @@ class ConversationalAI:
             trust_score = self.trust_calculator.calculate_trust_score(
                 query, data_coverage, response_specificity, source_quality
             )
-            trust_score['components'] = trust_components
+            
+            # Đảm bảo trust_score không None
+            if trust_score is None:
+                trust_score = {
+                    'score': 0.0,
+                    'confidence_level': 'Low',
+                    'color': 'red',
+                    'components': trust_components
+                }
+            else:
+                trust_score['components'] = trust_components
             
             step_id_trust = self.audit.add_trust_calculation_step(trust_components, calculation_method)
             
@@ -705,6 +839,7 @@ class ConversationalAI:
             }
             
         except Exception as e:
+            # Improved error handling
             error_trust_score = {
                 'score': 0.0, 
                 'confidence_level': 'Error', 
@@ -720,10 +855,18 @@ class ConversationalAI:
                 'trust_score': error_trust_score,
                 'audit_trail': self.audit.get_trail(),
                 'data_sources_used': [],
-                'reasoning_process': {'error': str(e)}
+                'reasoning_process': {
+                    'error': str(e),
+                    'steps': [],
+                    'data_points': [],
+                    'confidence_factors': {},
+                    'limitations': [f"Error occurred: {str(e)}"],
+                    'assumptions': []
+                }
             }
 
     def _create_reasoning_process(self, query: str, df: pd.DataFrame, analysis: Dict) -> Dict[str, Any]:
+        
         """Create detailed reasoning process for AI analysis"""
         
         reasoning = {
@@ -787,55 +930,88 @@ class ConversationalAI:
         return reasoning
 
     def _create_detailed_prompt(self, query: str, context: str, reasoning: Dict) -> str:
-        """Create detailed prompt with reasoning context"""
+        """Tạo prompt với nhấn mạnh sử dụng kết quả phân tích thực tế"""
         return f"""
-        Based on the following government dataset and detailed analysis process, please answer the user's question:
-        
-        Data Context:
+        You are analyzing government data. Use the DIRECT DATA ANALYSIS RESULTS provided below to answer the user's question.
+
+        IMPORTANT: If direct analysis results are provided, use them as your primary source. Be specific with numbers and findings.
+
+        Data Analysis Results:
         {context}
-        
-        Analysis Process Completed:
-        {json.dumps(reasoning['steps'], indent=2)}
-        
-        Key Data Points:
-        {chr(10).join(reasoning['data_points'])}
-        
-        Confidence Factors:
-        {json.dumps(reasoning['confidence_factors'], indent=2)}
-        
+
         User Question: {query}
-        
-        Guidelines:
-        - Answer in 60-80 words maximum
-        - Give key numbers and findings only
-        - Be direct and factual
-        - Skip detailed explanations
+
+        Instructions:
+        - If you see "DIRECT DATA ANALYSIS RESULTS" above, use those exact numbers and findings
+        - Answer with specific data points from the analysis
+        - If count results are shown, state the exact counts
+        - If value matches are found, mention them specifically
+        - Keep response under 100 words but be precise with data
+        - If no direct results, acknowledge what data is available and suggest related insights
         """
 
     def _create_context(self, analysis: Dict, df: pd.DataFrame) -> str:
-        """Create context string from data analysis"""
+        """Tạo context chi tiết với kết quả phân tích thực tế"""
         context_parts = []
         
         if not df.empty:
             context_parts.append(f"Dataset contains {len(df)} rows and {len(df.columns)} columns.")
-            context_parts.append(f"Columns: {', '.join(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
+            context_parts.append(f"Columns: {', '.join(df.columns)}")
             
-            sample_data = df.head(3).to_string()
-            context_parts.append(f"Sample data:\n{sample_data}")
+            # Thêm kết quả phân tích query
+            query_analysis = analysis.get('query_analysis', {})
+            
+            if query_analysis.get('data_found'):
+                context_parts.append("\n=== DIRECT DATA ANALYSIS RESULTS ===")
+                
+                # Thêm kết quả đếm
+                if query_analysis.get('count_results'):
+                    context_parts.append("COUNT RESULTS:")
+                    for result in query_analysis['count_results']:
+                        context_parts.append(f"- {result['question']}: {result['answer']}")
+                
+                # Thêm kết quả tìm kiếm giá trị
+                if query_analysis.get('value_matches'):
+                    context_parts.append("VALUE MATCHES:")
+                    for match in query_analysis['value_matches']:
+                        context_parts.append(f"- {match['column']} '{match['value']}': {match['count']} records ({match['percentage']}%)")
+            
+            # Chỉ show sample data nếu không có kết quả cụ thể
+            if not query_analysis.get('data_found'):
+                sample_data = df.head(5).to_string()
+                context_parts.append(f"\nSample data:\n{sample_data}")
         
         return "\n".join(context_parts)
     
     def _calculate_data_coverage(self, query: str, df: pd.DataFrame) -> float:
-        """Calculate how well the data covers the query"""
+        """Tính toán coverage dựa trên khả năng trả lời query"""
         if df.empty:
             return 0.0
         
+        # Phân tích query để tìm kết quả thực tế
+        analysis_engine = DataAnalysisEngine()
+        query_results = analysis_engine.execute_query_analysis(df, query)
+        
+        # Nếu tìm thấy kết quả cụ thể
+        if query_results.get('data_found'):
+            return 0.95  # High coverage vì có thể trả lời cụ thể
+        
+        # Fallback: kiểm tra keyword overlap
         query_words = set(query.lower().split())
         column_words = set(' '.join(df.columns).lower().split())
         
-        overlap = len(query_words.intersection(column_words))
+        # Kiểm tra content trong data
+        content_words = set()
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                content_words.update(' '.join(df[col].astype(str).unique()).lower().split())
+        
+        all_data_words = column_words.union(content_words)
+        overlap = len(query_words.intersection(all_data_words))
         coverage = min(overlap / len(query_words) if query_words else 0, 1.0)
-        return max(coverage, 0.5)
+        
+        return max(coverage, 0.3)  # Minimum coverage
+
     
     def _calculate_response_specificity(self, response: str) -> float:
         """Calculate response specificity"""
@@ -888,10 +1064,10 @@ def show_login():
         with col2:
             with st.form("login_form"):
                 st.markdown("### Demo Account")
-                st.info("Username: **user** | Password: **user**")
+                st.info("Username: **admin** | Password: **admin123**")
                 
-                username = st.text_input("Username", value="user")
-                password = st.text_input("Password", type="password", value="user")
+                username = st.text_input("Username", value="admin")
+                password = st.text_input("Password", type="password", value="admin123")
                 
                 if st.form_submit_button("🚀 Login", type="primary"):
                     if db.verify_user(username, password):
