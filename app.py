@@ -53,16 +53,50 @@ class DataProcessor:
         self.supported_formats = ['csv', 'xlsx', 'xls']
     
     def load_file(self, uploaded_file):
-        """Load and process uploaded file"""
+        """Load and process uploaded file with multiple encoding support"""
         try:
             file_extension = uploaded_file.name.split('.')[-1].lower()
             
             if file_extension == 'csv':
-                df = pd.read_csv(uploaded_file)
+                # Try multiple encodings for CSV files
+                encodings_to_try = ['utf-8', 'latin1', 'iso-8859-1', 'cp1252', 'utf-16']
+                df = None
+                
+                for encoding in encodings_to_try:
+                    try:
+                        # Reset file pointer
+                        uploaded_file.seek(0)
+                        df = pd.read_csv(uploaded_file, encoding=encoding)
+                        st.success(f"✅ File loaded successfully with {encoding} encoding")
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                    except Exception as e:
+                        # If it's not an encoding issue, try next encoding
+                        if 'codec' not in str(e).lower():
+                            break
+                        continue
+                
+                if df is None:
+                    # Last resort: try with error handling
+                    try:
+                        uploaded_file.seek(0)
+                        df = pd.read_csv(uploaded_file, encoding='utf-8', errors='ignore')
+                        st.warning("⚠️ File loaded with some characters ignored due to encoding issues")
+                    except Exception as e:
+                        return None, f"Unable to read CSV file with any encoding: {str(e)}"
+                        
             elif file_extension in ['xlsx', 'xls']:
-                df = pd.read_excel(uploaded_file)
+                try:
+                    df = pd.read_excel(uploaded_file)
+                except Exception as e:
+                    return None, f"Error reading Excel file: {str(e)}"
             else:
                 return None, f"Unsupported file format: {file_extension}"
+            
+            # Validate dataframe
+            if df is None or df.empty:
+                return None, "File appears to be empty or could not be read"
             
             metadata = {
                 'filename': uploaded_file.name,
@@ -74,6 +108,7 @@ class DataProcessor:
             }
             
             return df, metadata
+            
         except Exception as e:
             return None, f"Error loading file: {str(e)}"
     
@@ -1064,10 +1099,10 @@ def show_login():
         with col2:
             with st.form("login_form"):
                 st.markdown("### Demo Account")
-                st.info("Username: **admin** | Password: **admin123**")
+                st.info("Username: **user** | Password: **user**")
                 
-                username = st.text_input("Username", value="admin")
-                password = st.text_input("Password", type="password", value="admin123")
+                username = st.text_input("Username", value="user")
+                password = st.text_input("Password", type="password", value="user")
                 
                 if st.form_submit_button("🚀 Login", type="primary"):
                     if db.verify_user(username, password):

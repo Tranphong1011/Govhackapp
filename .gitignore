@@ -1,3 +1,4 @@
 testenv
 app_backup.py
 app_backup_2.py
+.streamlit/
