@@ -193,12 +193,12 @@ class UserDB:
             )
         ''')
         
-        # Tạo user admin mặc định
-        admin_password = self.hash_password("admin123")
+        # Tạo user  mặc định
+        admin_password = self.hash_password("user")
         c.execute('''
             INSERT OR IGNORE INTO users (username, password, full_name) 
             VALUES (?, ?, ?)
-        ''', ("admin", admin_password, "Administrator"))
+        ''', ("user", admin_password, "Administrator"))
         
         conn.commit()
         conn.close()

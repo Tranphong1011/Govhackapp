@@ -888,10 +888,10 @@ def show_login():
         with col2:
             with st.form("login_form"):
                 st.markdown("### Demo Account")
-                st.info("Username: **admin** | Password: **admin123**")
+                st.info("Username: **user** | Password: **user**")
                 
-                username = st.text_input("Username", value="admin")
-                password = st.text_input("Password", type="password", value="admin123")
+                username = st.text_input("Username", value="user")
+                password = st.text_input("Password", type="password", value="user")
                 
                 if st.form_submit_button("🚀 Login", type="primary"):
                     if db.verify_user(username, password):
